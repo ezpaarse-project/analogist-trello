@@ -1,0 +1,182 @@
+<html>
+<head>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+</head>
+<body>
+
+
+
+
+
+  <div id="platformsTableTarget"><img src="http://www.notaireghigny.be/wp-content/themes/ghigny/images/ajax.gif" alt="" /> En cours de chargement ...</div>
+
+  <script>
+    var $ = jQuery;
+  </script>
+
+  <!-- Template du tableau des plateformes réalisé
+       avec le language de template MustacheJS -->
+  <script src="//cdnjs.cloudflare.com/ajax/libs/mustache.js/0.8.1/mustache.min.js"></script>
+  <script id="platformsTableTpl" type="x-tmpl-mustache">
+  <table class="inline">
+    <tbody>
+      <tr class="row0">
+        <th class="col0"></th>
+        <th class="col1">Platforme</th>
+        <th class="col2">Status</th>
+        <th class="col3">Last update</th>
+        <th class="col4">Contributors</th>
+      </tr>
+      {{#platforms}}
+      <tr>
+        <td class="col0" title="Platform's trello card">
+          <a href="{{{platformTrelloCard}}}"><img src="http://i.frankwest.co.uk/articles/favicons/trello.jpg" alt="Carte trello" /></a>
+        </td>
+        <td class="col1">
+          <a href="{{{platformAnalysisUrl}}}" class="wikilink1">{{platformName}}</a>
+        </td>
+        <td class="col2">3 - Analyse des URLs terminée</td>
+        <td class="col3">{{platformDate}}</td>
+        <td class="col4">{{platformContact}}</td>
+      </tr>
+      {{/platforms}}
+    </tbody>
+  </table>
+  </script>
+  <script>
+    // compilation du template
+    var template = $('#platformsTableTpl').html();
+    console.log(template);
+    Mustache.parse(template);
+  </script>
+
+  <script>
+    // dès que le DOM est chargé, on va rechercher la
+    // liste des plateformes présentes dans le trello
+    $( document ).ready(function() {
+      // 53a94cab869a067146853167 = id de la liste des analyse terminées
+      getPlatformsFromTrelloList('53a94cab869a067146853167',
+        function (err, platforms) {
+          var tplVars = { platforms: platforms };
+          var rendered = Mustache.render(template, tplVars);
+          $('#platformsTableTarget').html(rendered);
+        }
+      );
+    });
+
+
+
+
+    /**
+     * Parse les détails d'une plateforme
+     * depuis la description d'une carte Trello
+     */
+    function getPlatformDataFromTrelloCard(cardId, cb) {
+      var cardUrl = 'https://api.trello.com/1/cards/' + cardId + '?fields=desc&key=7fa507c389612aa4ca03f781cf2a8242';
+      $.get(cardUrl, function (card) {
+        var res = {};
+        var regexpAnalyseUrl = new RegExp('(http://analogist.couperin.org/platforms/[^ $]+)');
+        var match;
+        if (match = card.desc.match(regexpAnalyseUrl)) {
+          res.analysisUrl = match[1];
+        }
+        cb(null, res);
+      });
+    }
+
+    /**
+     * Api key utilisée pour pouvoir interroger
+     * en AJAX l'API REST de Trello
+     */
+    function getTrelloApiKey() {
+      return '7fa507c389612aa4ca03f781cf2a8242';
+    }
+
+    /**
+     * Retourne la liste des plateformes présentes
+     * dans une liste Trello
+     */
+    function getPlatformsFromTrelloList(listId, cb) {
+      var platforms = [];
+      var listUrl = 'https://api.trello.com/1/lists/'
+        + listId
+        + '/cards?fields=url,name,dateLastActivity,idMembers&key='
+        + getTrelloApiKey();
+
+      $.get(listUrl, function (cards) {
+        getUsersFromTrelloCards(cards, function (err, users) {
+          var nbCbCalled = 0;
+          var platforms = [];
+          $.each(cards, function (idx, trelloCard) {
+            nbCbCalled++;
+            getPlatformFromTrelloCard(trelloCard, users, function (err, platform) {
+              platforms.push(platform);
+              nbCbCalled--;
+              if (nbCbCalled === 0) return cb(null, platforms);
+            });
+          });
+        });
+      });
+    }
+
+
+    /**
+     * Retourne les détails d'une plateforme depuis une carte Trello
+     */
+    function getPlatformFromTrelloCard(card, users, cb) {
+      var platform = {};
+      var itemMembers = [];
+      $.each(card.idMembers, function (idx2, memberId) {
+        itemMembers.push(users[memberId].fullName);
+      });
+      platform.platformContact = itemMembers.join (', ');
+      platform.platformName = card.name;
+      platform.platformTrelloCard = card.url;
+      platform.platformDate = new Date(card.dateLastActivity).toLocaleDateString();
+
+      getPlatformDataFromTrelloCard(card.id, function (err, cardData) {
+        platform.platformAnalysisUrl = cardData.analysisUrl;
+        cb(null, platform);
+      });
+    }
+
+    /**
+     * Retoure la liste des détails des utilisateurs 
+     * assignés à une carte Trello
+     */
+    function getUsersFromTrelloCards(cards, cb) {
+      // dédoublonnage de tous les users a récupérer
+      var userIds = [];
+      $.each(cards, function (idx, card) {
+        $.each(card.idMembers, function (idx2, userId) {
+          if (userIds.indexOf(userId) === -1) {
+            userIds.push(userId);
+          }
+        });
+      });
+      // récupération des info de chaque users
+      var users = {};
+      var nbCbCalled = 0;
+      $.each(userIds, function (idx, userId) {
+        var trelloUserUrl = 'https://api.trello.com/1/members/' + userId + '?key='+getTrelloApiKey();
+        nbCbCalled++;
+        $.get(trelloUserUrl, function (user) {
+          users[userId] = user;
+          nbCbCalled--;
+          if (nbCbCalled == 0) return cb(null, users);
+        });
+      });
+    }
+  </script>
+
+
+
+
+
+
+
+
+
+  
+</body>
+</html>
