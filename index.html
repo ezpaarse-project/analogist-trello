@@ -8,7 +8,12 @@
 
 
 
-  <div id="platformsTableTarget"><img src="http://www.notaireghigny.be/wp-content/themes/ghigny/images/ajax.gif" alt="" /> En cours de chargement ...</div>
+  <div id="platformsTableTarget" style="text-align: center">
+  <p style="font-size:150%">
+  <br/><br/><br/><br/>
+  Tableau de suivi des plateformes<br/>en cours de chargement ...</p>
+  <img src="http://analogist.couperin.org/_media/platforms/ajax-loading.gif" alt="" />
+  </div>
 
   <script>
     var $ = jQuery;
@@ -21,23 +26,30 @@
   <table class="inline">
     <tbody>
       <tr class="row0">
-        <th class="col0"></th>
-        <th class="col1">Platforme</th>
-        <th class="col2">Status</th>
-        <th class="col3">Last update</th>
-        <th class="col4">Contributors</th>
+        <th class="col0 leftalign">Platform name</th>
+        <th class="col1 leftalign" width="60px">Details</th>
+        <th class="col2 leftalign">Status</th>
+        <th class="col3 leftalign">Last update</th>
+        <th class="col4 leftalign">Contributors</th>
       </tr>
       {{#platforms}}
       <tr>
-        <td class="col0" title="Platform's trello card">
-          <a href="{{{platformTrelloCard}}}"><img src="http://i.frankwest.co.uk/articles/favicons/trello.jpg" alt="Carte trello" /></a>
+        <td class="col0 leftalign">
+          {{platformName}}
         </td>
-        <td class="col1">
-          <a href="{{{platformAnalysisUrl}}}" class="wikilink1">{{platformName}}</a>
+        <td class="col1 leftalign">
+
+          <a href="{{{platformTrelloCard}}}" title="Platform's Trello card"><img src="http://analogist.couperin.org/_media/platforms/trello.png" alt="Platform's trello card" width="16" /></a>
+
+          <a href="{{{platformAnalysisUrl}}}" title="Platform's URLs analysis"><img src="http://analogist.couperin.org/_media/platforms/analogist.png" alt="Platform's URLs analysis" width="16" /></a>
+{{#platformGitHubUrl}}
+          <a href="{{{platformGitHubUrl}}}" title="Platform's source code: parser/scraper/pkb"><img src="http://analogist.couperin.org/_media/platforms/github.png" alt="Platform's source code: parser/scraper/pkb" width="16" /></a>
+{{/platformGitHubUrl}}
+
         </td>
-        <td class="col2">3 - Analyse des URLs terminée</td>
-        <td class="col3">{{platformDate}}</td>
-        <td class="col4">{{platformContact}}</td>
+        <td class="col2 leftalign">{{platformStatus}}</td>
+        <td class="col3 leftalign">{{platformDate}}</td>
+        <td class="col4 leftalign">{{platformContact}}</td>
       </tr>
       {{/platforms}}
     </tbody>
@@ -46,26 +58,46 @@
   <script>
     // compilation du template
     var template = $('#platformsTableTpl').html();
-    console.log(template);
+    //console.log(template);
     Mustache.parse(template);
   </script>
 
   <script>
-    // dès que le DOM est chargé, on va rechercher la
-    // liste des plateformes présentes dans le trello
+    // dès que le DOM est chargé, on va rechercher la liste des colonnes
+    // du board de suivi des plateformes d'ezPAARSE
     $( document ).ready(function() {
-      // 53a94cab869a067146853167 = id de la liste des analyse terminées
-      getPlatformsFromTrelloList('53a94cab869a067146853167',
-        function (err, platforms) {
-          var tplVars = { platforms: platforms };
-          var rendered = Mustache.render(template, tplVars);
-          $('#platformsTableTarget').html(rendered);
-        }
-      );
+      getTrelloBoardLists('wEaLnz8d', function (err, lists) {
+        var nbCbCalled = 0;
+        var platformsList = {};
+        $.each(lists, function (idX, trelloList) {
+          nbCbCalled++;
+          // puis la liste des plateformes présentes
+          // dans chaque listes du trello
+          getPlatformsFromTrelloList(trelloList,
+            function (err, platforms) {
+              nbCbCalled--;
+              platformsList[trelloList.pos] = platforms;
+              if (nbCbCalled === 0) {
+                displayPlatformsTable(platformsList);
+              }
+            }
+          );
+        });
+      });      
     });
 
 
-
+    /**
+     * Affiche la liste des plateformes dans le tableau HTML
+     */
+    function displayPlatformsTable(platforms) {
+      var tplVars = { platforms: [] };
+      $.each(platforms, function (idx, subList) {
+        tplVars.platforms = tplVars.platforms.concat(subList);
+      });
+      var rendered = Mustache.render(template, tplVars);
+      $('#platformsTableTarget').html(rendered);
+    }
 
     /**
      * Parse les détails d'une plateforme
@@ -75,10 +107,14 @@
       var cardUrl = 'https://api.trello.com/1/cards/' + cardId + '?fields=desc&key=7fa507c389612aa4ca03f781cf2a8242';
       $.get(cardUrl, function (card) {
         var res = {};
-        var regexpAnalyseUrl = new RegExp('(http://analogist.couperin.org/platforms/[^ $]+)');
+        var regexpAnalyseUrl = new RegExp('(http://analogist.couperin.org/platforms/[^ $\n]+)');
+        var regexpGitHubPlatform = new RegExp('(https://github.com/ezpaarse-project/ezpaarse-platforms/[^ $\n]+)');
         var match;
         if (match = card.desc.match(regexpAnalyseUrl)) {
           res.analysisUrl = match[1];
+        }
+        if (match = card.desc.match(regexpGitHubPlatform)) {
+          res.gitHubUrl = match[1];
         }
         cb(null, res);
       });
@@ -93,26 +129,54 @@
     }
 
     /**
+     * Retourne les listes présentes dans un board Trello
+     * https://trello.com/docs/api/board/index.html#get-1-boards-board-id-lists
+     */
+    function getTrelloBoardLists(boardId, cb) {
+      var platforms = [];
+      var boardUrl = 'https://api.trello.com/1/boards/'
+        + boardId
+        + '/lists?key='
+        + getTrelloApiKey();
+
+      $.get(boardUrl, function (lists) {
+        cb(null, lists);
+      });
+    }
+
+    /**
      * Retourne la liste des plateformes présentes
      * dans une liste Trello
      */
-    function getPlatformsFromTrelloList(listId, cb) {
+    function getPlatformsFromTrelloList(trelloList, cb) {
       var platforms = [];
       var listUrl = 'https://api.trello.com/1/lists/'
-        + listId
+        + trelloList.id
         + '/cards?fields=url,name,dateLastActivity,idMembers&key='
         + getTrelloApiKey();
-
       $.get(listUrl, function (cards) {
+        if (cards.length === 0) cb(null, []);
         getUsersFromTrelloCards(cards, function (err, users) {
           var nbCbCalled = 0;
           var platforms = [];
           $.each(cards, function (idx, trelloCard) {
             nbCbCalled++;
             getPlatformFromTrelloCard(trelloCard, users, function (err, platform) {
-              platforms.push(platform);
+              // retire  le contenu des parenthèses dans le nom des colonnes
+              platform.platformStatus = trelloList.name.replace(new RegExp(' *\\([^)]+\\)'), '');
+              // n'affiche pas la carte modèle
+              // https://trello.com/c/rlb3YezS/3-nom-pltfrme-modele-a-copier
+              if (platform.card.id !== '53a87de4bd5c53ac097bf28e') {
+                platforms.push(platform);
+              }
               nbCbCalled--;
-              if (nbCbCalled === 0) return cb(null, platforms);
+              if (nbCbCalled === 0) {
+                // tri des plateformes par dates
+                platforms = platforms.sort(function (p1, p2) {
+                  return p1.card.dateLastActivity < p2.card.dateLastActivity;
+                });
+                return cb(null, platforms);
+              }
             });
           });
         });
@@ -133,9 +197,11 @@
       platform.platformName = card.name;
       platform.platformTrelloCard = card.url;
       platform.platformDate = new Date(card.dateLastActivity).toLocaleDateString();
+      platform.card = card;
 
       getPlatformDataFromTrelloCard(card.id, function (err, cardData) {
         platform.platformAnalysisUrl = cardData.analysisUrl;
+        platform.platformGitHubUrl   = cardData.gitHubUrl;
         cb(null, platform);
       });
     }
@@ -157,6 +223,7 @@
       // récupération des info de chaque users
       var users = {};
       var nbCbCalled = 0;
+      if (userIds.length === 0) return cb(null, users);
       $.each(userIds, function (idx, userId) {
         var trelloUserUrl = 'https://api.trello.com/1/members/' + userId + '?key='+getTrelloApiKey();
         nbCbCalled++;
